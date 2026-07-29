@@ -107,7 +107,7 @@ pub struct AttributesPart {
 /// An individual object in a `ListBucketResult`
 #[derive(Deserialize, Debug, Clone)]
 pub struct Object {
-    #[serde(rename = "LastModified")]
+    #[serde(rename = "LastModified", default)]
     /// Date and time the object was last modified.
     pub last_modified: String,
     #[serde(rename = "ETag")]
@@ -207,7 +207,7 @@ pub struct BucketLocationResult {
 /// This accepts the ListBucketResult format returned for both ListObjects and ListObjectsV2
 #[derive(Deserialize, Debug, Clone)]
 pub struct ListBucketResult {
-    #[serde(rename = "Name")]
+    #[serde(rename = "Name", default)]
     /// Name of the bucket.
     pub name: String,
     #[serde(rename = "Delimiter")]
@@ -906,12 +906,34 @@ impl Transition {
 mod test {
     use crate::serde_types::{
         AbortIncompleteMultipartUpload, BucketLifecycleConfiguration, Expiration, LifecycleFilter,
-        LifecycleRule, NoncurrentVersionExpiration, NoncurrentVersionTransition, Transition,
+        LifecycleRule, ListBucketResult, NoncurrentVersionExpiration, NoncurrentVersionTransition,
+        Transition,
     };
 
     use super::{
         CorsConfiguration, CorsRule, DeleteObjectsRequest, DeleteObjectsResult, ObjectIdentifier,
     };
+
+    #[test]
+    fn list_bucket_result_accepts_missing_optional_provider_metadata() {
+        let response = r#"
+            <ListBucketResult>
+                <IsTruncated>false</IsTruncated>
+                <Contents>
+                    <Key>attachment.bin</Key>
+                    <Size>42</Size>
+                </Contents>
+            </ListBucketResult>
+        "#;
+
+        let result: ListBucketResult = quick_xml::de::from_str(response).unwrap();
+
+        assert_eq!(result.name, "");
+        assert_eq!(result.contents.len(), 1);
+        assert_eq!(result.contents[0].last_modified, "");
+        assert_eq!(result.contents[0].key, "attachment.bin");
+        assert_eq!(result.contents[0].size, 42);
+    }
 
     #[test]
     fn cors_config_serde() {
