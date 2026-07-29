@@ -249,7 +249,7 @@ pub trait Request {
                 .await?
                 .expect("Secret key must be provided to sign headers, found None"),
             &self.bucket().region(),
-            "s3",
+            self.bucket().service(),
         )
     }
 
@@ -287,7 +287,12 @@ pub trait Request {
     }
 
     fn string_to_sign(&self, request: &str) -> Result<String, S3Error> {
-        signing::string_to_sign(&self.datetime(), &self.bucket().region(), request)
+        signing::string_to_sign_with_service(
+            &self.datetime(),
+            &self.bucket().region(),
+            self.bucket().service(),
+            request,
+        )
     }
 
     fn host_header(&self) -> String {
@@ -460,10 +465,11 @@ pub trait Request {
         let url = Url::parse(&format!(
             "{}{}{}",
             self.url()?,
-            &signing::authorization_query_params_no_sig(
+            &signing::authorization_query_params_no_sig_with_service(
                 &self.bucket().access_key().await?.unwrap_or_default(),
                 &self.datetime(),
                 &self.bucket().region(),
+                self.bucket().service(),
                 expiry,
                 custom_headers,
                 token.as_ref()
@@ -490,10 +496,11 @@ pub trait Request {
         let url = Url::parse(&format!(
             "{}{}{}",
             self.url()?,
-            &signing::authorization_query_params_no_sig(
+            &signing::authorization_query_params_no_sig_with_service(
                 &self.bucket().access_key()?.unwrap_or_default(),
                 &self.datetime(),
                 &self.bucket().region(),
+                self.bucket().service(),
                 expiry,
                 custom_headers,
                 token.as_ref()
@@ -678,7 +685,7 @@ pub trait Request {
         hmac.update(string_to_sign.as_bytes());
         let signature = hex::encode(hmac.finalize().into_bytes());
         let signed_header = signing::signed_header_string(headers);
-        signing::authorization_header(
+        signing::authorization_header_with_service(
             &self
                 .bucket()
                 .access_key()
@@ -686,6 +693,7 @@ pub trait Request {
                 .expect("No access_key provided"),
             &self.datetime(),
             &self.bucket().region(),
+            self.bucket().service(),
             &signed_header,
             &signature,
         )

@@ -166,10 +166,20 @@ pub fn canonical_request(
 
 /// Generate an AWS scope string.
 pub fn scope_string(datetime: &OffsetDateTime, region: &Region) -> Result<String, S3Error> {
+    scope_string_with_service(datetime, region, "s3")
+}
+
+/// Generate an AWS scope string for a custom service name.
+pub fn scope_string_with_service(
+    datetime: &OffsetDateTime,
+    region: &Region,
+    service: &str,
+) -> Result<String, S3Error> {
     Ok(format!(
-        "{date}/{region}/s3/aws4_request",
+        "{date}/{region}/{service}/aws4_request",
         date = datetime.format(SHORT_DATE)?,
-        region = region
+        region = region,
+        service = service
     ))
 }
 
@@ -180,12 +190,22 @@ pub fn string_to_sign(
     region: &Region,
     canonical_req: &str,
 ) -> Result<String, S3Error> {
+    string_to_sign_with_service(datetime, region, "s3", canonical_req)
+}
+
+/// Generate the "string to sign" for a custom service name.
+pub fn string_to_sign_with_service(
+    datetime: &OffsetDateTime,
+    region: &Region,
+    service: &str,
+    canonical_req: &str,
+) -> Result<String, S3Error> {
     let mut hasher = Sha256::default();
     hasher.update(canonical_req.as_bytes());
     let string_to = format!(
         "AWS4-HMAC-SHA256\n{timestamp}\n{scope}\n{hash}",
         timestamp = datetime.format(LONG_DATETIME)?,
-        scope = scope_string(datetime, region)?,
+        scope = scope_string_with_service(datetime, region, service)?,
         hash = hex::encode(hasher.finalize().as_slice())
     );
     Ok(string_to)
@@ -219,11 +239,30 @@ pub fn authorization_header(
     signed_headers: &str,
     signature: &str,
 ) -> Result<String, S3Error> {
+    authorization_header_with_service(
+        access_key,
+        datetime,
+        region,
+        "s3",
+        signed_headers,
+        signature,
+    )
+}
+
+/// Generate the AWS authorization header for a custom service name.
+pub fn authorization_header_with_service(
+    access_key: &str,
+    datetime: &OffsetDateTime,
+    region: &Region,
+    service: &str,
+    signed_headers: &str,
+    signature: &str,
+) -> Result<String, S3Error> {
     Ok(format!(
         "AWS4-HMAC-SHA256 Credential={access_key}/{scope},\
             SignedHeaders={signed_headers},Signature={signature}",
         access_key = access_key,
-        scope = scope_string(datetime, region)?,
+        scope = scope_string_with_service(datetime, region, service)?,
         signed_headers = signed_headers,
         signature = signature
     ))
@@ -237,7 +276,32 @@ pub fn authorization_query_params_no_sig(
     custom_headers: Option<&HeaderMap>,
     token: Option<&String>,
 ) -> Result<String, S3Error> {
-    let credentials = format!("{}/{}", access_key, scope_string(datetime, region)?);
+    authorization_query_params_no_sig_with_service(
+        access_key,
+        datetime,
+        region,
+        "s3",
+        expires,
+        custom_headers,
+        token,
+    )
+}
+
+/// Generate presigned URL query parameters for a custom service name.
+pub fn authorization_query_params_no_sig_with_service(
+    access_key: &str,
+    datetime: &OffsetDateTime,
+    region: &Region,
+    service: &str,
+    expires: u32,
+    custom_headers: Option<&HeaderMap>,
+    token: Option<&String>,
+) -> Result<String, S3Error> {
+    let credentials = format!(
+        "{}/{}",
+        access_key,
+        scope_string_with_service(datetime, region, service)?
+    );
     let credentials = utf8_percent_encode(&credentials, FRAGMENT_SLASH);
 
     let mut signed_headers = vec!["host".to_string()];
@@ -453,6 +517,24 @@ mod tests {
         let mut hmac = Hmac::<Sha256>::new_from_slice(&signing_key.unwrap()).unwrap();
         hmac.update(string_to_sign.as_bytes());
         assert_eq!(expected, hex::encode(hmac.finalize().into_bytes()));
+    }
+
+    #[test]
+    fn test_custom_service_scope() {
+        let datetime = Date::from_calendar_date(2013, 5.try_into().unwrap(), 24)
+            .unwrap()
+            .with_hms(0, 0, 0)
+            .unwrap()
+            .assume_utc();
+
+        assert_eq!(
+            scope_string_with_service(&datetime, &"us-east-1".parse().unwrap(), "oss").unwrap(),
+            "20130524/us-east-1/oss/aws4_request"
+        );
+        assert_eq!(
+            scope_string(&datetime, &"us-east-1".parse().unwrap()).unwrap(),
+            "20130524/us-east-1/s3/aws4_request"
+        );
     }
 
     #[test]

@@ -145,6 +145,7 @@ pub struct Bucket {
     pub request_timeout: Option<Duration>,
     path_style: bool,
     listobjects_v2: bool,
+    service: String,
     #[cfg(feature = "with-tokio")]
     http_client: reqwest::Client,
     #[cfg(feature = "with-tokio")]
@@ -645,6 +646,7 @@ impl Bucket {
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
             path_style: false,
             listobjects_v2: true,
+            service: "s3".to_string(),
             #[cfg(feature = "with-tokio")]
             http_client: client(&options)?,
             #[cfg(feature = "with-tokio")]
@@ -676,6 +678,7 @@ impl Bucket {
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
             path_style: false,
             listobjects_v2: true,
+            service: "s3".to_string(),
             #[cfg(feature = "with-tokio")]
             http_client: client(&options)?,
             #[cfg(feature = "with-tokio")]
@@ -693,6 +696,34 @@ impl Bucket {
             request_timeout: self.request_timeout,
             path_style: true,
             listobjects_v2: self.listobjects_v2,
+            service: self.service.clone(),
+            #[cfg(feature = "with-tokio")]
+            http_client: self.http_client(),
+            #[cfg(feature = "with-tokio")]
+            client_options: self.client_options.clone(),
+        })
+    }
+
+    /// Get the service name used in the AWS Signature Version 4 credential scope.
+    pub fn service(&self) -> &str {
+        &self.service
+    }
+
+    /// Return a copy of this bucket configured to sign requests for `service`.
+    ///
+    /// The default service name is `s3`. Some S3-compatible providers require a
+    /// provider-specific service name in the Signature Version 4 credential scope.
+    pub fn with_service(&self, service: &str) -> Box<Bucket> {
+        Box::new(Bucket {
+            name: self.name.clone(),
+            region: self.region.clone(),
+            credentials: self.credentials.clone(),
+            extra_headers: self.extra_headers.clone(),
+            extra_query: self.extra_query.clone(),
+            request_timeout: self.request_timeout,
+            path_style: self.path_style,
+            listobjects_v2: self.listobjects_v2,
+            service: service.to_string(),
             #[cfg(feature = "with-tokio")]
             http_client: self.http_client(),
             #[cfg(feature = "with-tokio")]
@@ -710,6 +741,7 @@ impl Bucket {
             request_timeout: self.request_timeout,
             path_style: self.path_style,
             listobjects_v2: self.listobjects_v2,
+            service: self.service.clone(),
             #[cfg(feature = "with-tokio")]
             http_client: self.http_client(),
             #[cfg(feature = "with-tokio")]
@@ -730,6 +762,7 @@ impl Bucket {
             request_timeout: self.request_timeout,
             path_style: self.path_style,
             listobjects_v2: self.listobjects_v2,
+            service: self.service.clone(),
             #[cfg(feature = "with-tokio")]
             http_client: self.http_client(),
             #[cfg(feature = "with-tokio")]
@@ -748,6 +781,7 @@ impl Bucket {
             request_timeout: Some(request_timeout),
             path_style: self.path_style,
             listobjects_v2: self.listobjects_v2,
+            service: self.service.clone(),
         }))
     }
 
@@ -767,6 +801,7 @@ impl Bucket {
             request_timeout: Some(request_timeout),
             path_style: self.path_style,
             listobjects_v2: self.listobjects_v2,
+            service: self.service.clone(),
             #[cfg(feature = "with-tokio")]
             http_client: client(&options)?,
             #[cfg(feature = "with-tokio")]
@@ -784,6 +819,7 @@ impl Bucket {
             request_timeout: self.request_timeout,
             path_style: self.path_style,
             listobjects_v2: false,
+            service: self.service.clone(),
             #[cfg(feature = "with-tokio")]
             http_client: self.http_client(),
             #[cfg(feature = "with-tokio")]
@@ -842,6 +878,7 @@ impl Bucket {
             request_timeout: self.request_timeout,
             path_style: self.path_style,
             listobjects_v2: self.listobjects_v2,
+            service: self.service.clone(),
             http_client: client(&options)?,
             client_options: options,
         })
@@ -875,6 +912,7 @@ impl Bucket {
             request_timeout: self.request_timeout,
             path_style: self.path_style,
             listobjects_v2: self.listobjects_v2,
+            service: self.service.clone(),
             http_client: client(&options)?,
             client_options: options,
         })
@@ -4117,6 +4155,54 @@ mod test {
 
         let url = bucket.presign_get(s3_path, 86400, None).await.unwrap();
         assert!(url.contains("/test/test.file?"))
+    }
+
+    #[maybe_async::test(
+        feature = "sync",
+        async(all(not(feature = "sync"), feature = "with-tokio"), tokio::test),
+        async(
+            all(not(feature = "sync"), feature = "with-async-std"),
+            async_std::test
+        )
+    )]
+    async fn test_presign_get_with_custom_service() {
+        let bucket = test_presign_bucket().with_service("oss");
+
+        let url = bucket
+            .presign_get("/test/test.file", 86400, None)
+            .await
+            .unwrap();
+
+        assert!(url.contains("%2Foss%2Faws4_request"));
+    }
+
+    #[test]
+    fn custom_service_is_preserved_by_bucket_builders() {
+        let bucket = test_presign_bucket().with_service("oss");
+
+        assert_eq!(
+            Bucket::new_public("public", Region::UsEast1)
+                .unwrap()
+                .service(),
+            "s3"
+        );
+        assert_eq!(bucket.service(), "oss");
+        assert_eq!(bucket.with_path_style().service(), "oss");
+        assert_eq!(
+            bucket
+                .with_extra_headers(HeaderMap::new())
+                .unwrap()
+                .service(),
+            "oss"
+        );
+        assert_eq!(
+            bucket
+                .with_extra_query(Default::default())
+                .unwrap()
+                .service(),
+            "oss"
+        );
+        assert_eq!(bucket.with_listobjects_v1().service(), "oss");
     }
 
     #[maybe_async::test(

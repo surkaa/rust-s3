@@ -69,7 +69,7 @@ impl<'a> PostPolicy<'a> {
         let credential = format!(
             "{}/{}",
             access_key,
-            signing::scope_string(now, &bucket.region)?
+            signing::scope_string_with_service(now, &bucket.region, bucket.service())?
         );
 
         let mut post_policy = self
@@ -125,7 +125,7 @@ impl<'a> PostPolicy<'a> {
                 CredentialsError::ConfigMissingSecretKey,
             ))?,
             &bucket.region,
-            "s3",
+            bucket.service(),
         )?;
 
         let mut hmac = signing::HmacSha256::new_from_slice(&signing_key)?;
@@ -683,6 +683,33 @@ mod test {
                     {"x-amz-date": "20151229T000000Z"},
                 ])
             );
+        }
+
+        #[maybe_async::test(
+            feature = "sync",
+            async(all(not(feature = "sync"), feature = "with-tokio"), tokio::test),
+            async(
+                all(not(feature = "sync"), feature = "with-async-std"),
+                async_std::test
+            )
+        )]
+        async fn uses_custom_service_in_credentials() {
+            let policy = PostPolicy::new(86400)
+                .condition(
+                    PostPolicyField::Key,
+                    PostPolicyValue::StartsWith(Cow::from("user/user1/")),
+                )
+                .unwrap();
+            let bucket = test_bucket().with_service("oss");
+
+            let _ts = with_timestamp(1_451_347_200);
+            let policy = policy.build(&now_utc(), &bucket).await.unwrap();
+            let data = serde_json::to_value(&policy).unwrap();
+
+            assert!(data["conditions"].as_array().unwrap().contains(&json!({
+                "x-amz-credential":
+                    "AKIAIOSFODNN7EXAMPLE/20151229/us-east-1/oss/aws4_request"
+            })));
         }
 
         #[maybe_async::test(
